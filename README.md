@@ -36,7 +36,7 @@ Her çalıştırmada agent sırayla:
 1. [@BotFather](https://t.me/BotFather) üzerinden bir Telegram botu oluşturup token alın.
 2. Botla bir kere konuşup (`/start`) `chat_id`'nizi Telegram API'nin `getUpdates` endpoint'inden öğrenin.
 3. `.env.example` dosyasını `.env` olarak kopyalayıp kendi token/chat_id değerlerinizi girin (`.env` asla commit edilmez, `.gitignore` içinde).
-4. Routine'in prompt'unu güncellemek isterseniz [claude.ai/code/routines](https://claude.ai/code/routines) üzerinden veya Claude Code'da `RemoteTrigger` aracıyla düzenleyebilirsiniz.
+4. Routine'in prompt'unu güncellemek isterseniz [routine-prompt.md](./routine-prompt.md) dosyasını düzenleyip [claude.ai/code/routines](https://claude.ai/code/routines) üzerinden veya Claude Code'da `RemoteTrigger action: update` aracıyla routine'e geri yükleyebilirsiniz (dosyadaki `{{TELEGRAM_BOT_TOKEN}}` / `{{TELEGRAM_CHAT_ID}}` yer tutucularını gerçek değerlerle değiştirmeyi unutmayın).
 
 ## Notlar
 
