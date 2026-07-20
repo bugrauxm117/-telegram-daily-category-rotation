@@ -11,6 +11,10 @@ Sen dünyanın en prestijli ansiklopedilerinin, tarihçilerinin, gelecek bilimci
 BOT_TOKEN={{TELEGRAM_BOT_TOKEN}}
 CHAT_ID={{TELEGRAM_CHAT_ID}}
 
+ADIM 0 - ANINDA GÜVENCE MESAJI (ASLA ATLAMA, HER ŞEYDEN ÖNCE, WebSearch/içerik üretiminden ÖNCE yap): Hiçbir araştırma/üretim yapmadan, İLK TOOL ÇAĞRIN olarak şunu gönder:
+curl -s "https://api.telegram.org/bot$BOT_TOKEN/sendMessage" -d "chat_id=$CHAT_ID" --data-urlencode "text=⏳ Bugünkü analiz hazırlanıyor..."
+Dönen JSON'dan "result":{"message_id":<ID>,...} değerini oku ve PLACEHOLDER_MSG_ID olarak sakla (bash değişkenine ata, örn. `grep -o '"message_id":[0-9]*' | head -1 | grep -o '[0-9]*'`). Bu adım günün TEK garantili gönderisidir — geri kalan her şey başarısız olsa bile Telegram'da mutlaka bir iz kalmasını sağlar. Bu adım kendisi "ok":false dönerse (ör. ağ sorunu) sadece 1 kez tekrar dene, olmazsa devam et.
+
 ADIM 1 - KONU SEÇ (günlük kategori rotasyonu, tek adımda karar ver, araştırma yapma): Bash'te 'date +%u' çalıştır (1=Pazartesi...7=Pazar). Eşlemeye göre kategori seç:
 1->Tarih, 2->Bilim & Teknoloji, 3->Uzay & Fütürizm, 4->Felsefe & Psikoloji, 5->Sanat & Kültür, 6->Ekonomi & Toplum, 7->Gizemler & Keşifler.
 Kendi bilginden (araştırma yapmadan), bu kategoride önceden işlenmiş klişeleri (yapay zeka, iklim değişikliği gibi) ATLAYARAK spesifik, çarpıcı bir konu seç.
@@ -51,8 +55,14 @@ ADIM 5 - QUIZ (araştırma yapmadan, kendi bilginden): Konuyla ilgili 4 şıklı
 
 ADIM 6 - TELEGRAM'A GÖNDER (Bash+curl, sırayla, her adımda "ok":true kontrolü):
 1) sendPhoto (görsel varsa): https://api.telegram.org/bot$BOT_TOKEN/sendPhoto -d chat_id=$CHAT_ID -d photo=<url> -d parse_mode=Markdown --data-urlencode 'caption=🌐 *[BAŞLIK]*\nKısa teaser.'
-2) sendMessage: ana içeriği 4000 karakteri geçmeyecek parçalara böl (GEÇMİŞ/GÜNÜMÜZ/GELECEK/GENEL KÜLTÜR sınırlarından), her parçayı ayrı sendMessage ile parse_mode=Markdown gönder. Metni bash değişkenine ata, --data-urlencode "text=$DEGISKEN" kullan (dosyaya yazıp @dosya ile OKUMA, bazı ortamlarda çalışmıyor).
+2) sendMessage: ana içeriği 4000 karakteri geçmeyecek parçalara böl (GEÇMİŞ/GÜNÜMÜZ/GELECEK/GENEL KÜLTÜR sınırlarından). PLACEHOLDER_MSG_ID doluysa İLK parçayı `editMessageText` (-d chat_id=$CHAT_ID -d message_id=$PLACEHOLDER_MSG_ID -d parse_mode=Markdown --data-urlencode "text=...") ile Adım 0'daki placeholder mesajının ÜZERİNE yaz (yeni mesaj olarak gönderme); PLACEHOLDER_MSG_ID yoksa (Adım 0 başarısız olduysa) normal sendMessage kullan. Geri kalan parçaları ayrı sendMessage çağrılarıyla parse_mode=Markdown gönder. Metni bash değişkenine ata, --data-urlencode "text=$DEGISKEN" kullan (dosyaya yazıp @dosya ile OKUMA, bazı ortamlarda çalışmıyor).
 3) Son parçada veya ayrı kısa mesajda (text='🔗 Derinlemesine incelemek için:') reply_markup=ADIM4 JSON'u --data-urlencode "reply_markup=$JSON" ile ekle.
 4) sendPoll: -d type=quiz -d is_anonymous=true -d correct_option_id=<0-3> --data-urlencode "question=..." --data-urlencode 'options=["A","B","C","D"]'
 
 Başarısız "ok":false dönerse SADECE 1 kez basit düzeltmeyle (örn. parse_mode'suz) tekrar dene, sonra vazgeçip devam et. Toplamda görev mümkün olduğunca az araştırma/deneme ile hızlıca tamamlanmalı.
+
+ADIM 7 - GARANTİ KONTROLÜ (KRİTİK, ASLA ATLAMA): Adım 6 sonunda gönderdiğin çağrılardan (editMessageText veya sendMessage) EN AZ BİRİNİN "ok":true döndürdüğünü teyit et. Eğer herhangi bir nedenle (içerik üretimi, görsel, kaynak arama vb. adımlarda takılma/hata) bu noktaya kadar hiçbir mesaj başarıyla gönderilmediyse/güncellenmediyse, her şeyi bırak ve DERHAL aşağıdakini yap:
+- PLACEHOLDER_MSG_ID doluysa: `editMessageText` ile o mesajı şu metne çevir.
+- PLACEHOLDER_MSG_ID de yoksa (Adım 0 da başarısız olduysa): aynı metinle yeni bir `sendMessage` gönder.
+Metin: "⚠️ Bugünkü otomatik analiz üretilirken bir sorunla karşılaşıldı, bu yüzden kısa geçiyorum: [elindeki konu başlığı varsa yaz, yoksa 'konu seçilemedi']. Yarın normal şekilde devam edecek."
+Kullanıcının hiçbir gün tam sessizlik yaşamaması bu adımın tek amacıdır — mükemmel olmasa da MUTLAKA bir şey gönder ya da placeholder'ı boş/asılı bırakma.
