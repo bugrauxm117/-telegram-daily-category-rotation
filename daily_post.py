@@ -108,7 +108,10 @@ def generate_content(category):
         max_tokens=4096,
         messages=[{"role": "user", "content": GENERATION_PROMPT.format(category=category)}],
     )
-    raw = response.content[0].text.strip()
+    text_blocks = [b.text for b in response.content if getattr(b, "type", None) == "text"]
+    if not text_blocks:
+        raise RuntimeError(f"Yanıtta text bloğu yok, gelen block tipleri: {[getattr(b, 'type', None) for b in response.content]}")
+    raw = text_blocks[0].strip()
     if raw.startswith("```"):
         raw = raw.strip("`")
         raw = raw.split("\n", 1)[1] if "\n" in raw else raw
