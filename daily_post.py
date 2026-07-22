@@ -26,15 +26,16 @@ MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-5")
 TG_API = f"https://api.telegram.org/bot{BOT_TOKEN}"
 HTTP_TIMEOUT = 20
 
-CATEGORY_BY_WEEKDAY = {
-    1: "Tarih",
-    2: "Bilim & Teknoloji",
-    3: "Uzay & Fütürizm",
-    4: "Felsefe & Psikoloji",
-    5: "Sanat & Kültür",
-    6: "Ekonomi & Toplum",
-    7: "Gizemler & Keşifler",
-}
+CATEGORIES = [
+    "Bilim & Uzay",
+    "Tarih",
+    "Sanat & Estetik",
+    "Felsefe & Düşünce",
+    "Psikoloji & İnsan Zihni",
+    "Ekonomi & Toplum",
+    "Teknoloji & Gelecek",
+    "Matematik & Mantık",
+]
 
 
 def tg_send_message(text, reply_markup=None):
@@ -167,48 +168,82 @@ def find_wikipedia_link(title_tr, title_en):
 
 
 def find_image(title_tr, title_en):
-    # Önce Türkçe Wikipedia REST API'sini dene
+    methods_tried = []
+
+    # Yöntem 1: Wikipedia REST API (thumbnail veya original)
     for lang, title in (("tr", title_tr), ("en", title_en)):
         if not title:
             continue
         try:
             url = f"https://{lang}.wikipedia.org/api/rest_v1/page/summary/{urllib.parse.quote(title.replace(' ', '_'))}"
-            print(f"[debug] Wikipedia API çağrı ({lang}): {url}", file=sys.stderr)
+            print(f"[debug] Yöntem 1: Wikipedia REST API ({lang})", file=sys.stderr)
             r = requests.get(url, timeout=10)
+            methods_tried.append(f"Wikipedia-REST-{lang}")
             if r.status_code == 200:
-                thumb = r.json().get("thumbnail", {}).get("source")
-                if thumb:
-                    print(f"[debug] Thumbnail bulundu ({lang}): {thumb}", file=sys.stderr)
-                    return thumb
+                data = r.json()
+                thumb = data.get("thumbnail", {}).get("source")
+                original = data.get("originalimage", {}).get("source")
+                image_url = original or thumb
+                if image_url:
+                    print(f"[debug] ✓ Görsel bulundu ({lang}): {image_url}", file=sys.stderr)
+                    return image_url
         except Exception as e:
-            print(f"[debug] Wikipedia ({lang}) hatası: {type(e).__name__}: {e}", file=sys.stderr)
+            print(f"[debug] Wikipedia REST ({lang}) hatası: {e}", file=sys.stderr)
 
-    # Wikimedia Commons'dan ara
+    # Yöntem 2: Wikipedia pageimages API (original image)
+    for lang, title in (("tr", title_tr), ("en", title_en)):
+        if not title:
+            continue
+        try:
+            url = f"https://{lang}.wikipedia.org/w/api.php?action=query&titles={urllib.parse.quote(title)}&prop=pageimages&piprop=original&format=json"
+            print(f"[debug] Yöntem 2: Wikipedia pageimages API ({lang})", file=sys.stderr)
+            r = requests.get(url, timeout=10)
+            methods_tried.append(f"Wikipedia-pageimages-{lang}")
+            if r.status_code == 200:
+                pages = r.json().get("query", {}).get("pages", {})
+                for page in pages.values():
+                    image_url = page.get("original", {}).get("source")
+                    if image_url:
+                        print(f"[debug] ✓ Görsel bulundu ({lang} pageimages): {image_url}", file=sys.stderr)
+                        return image_url
+        except Exception as e:
+            print(f"[debug] Wikipedia pageimages ({lang}) hatası: {e}", file=sys.stderr)
+
+    # Yöntem 3: Wikimedia Commons arama
     search_term = title_tr or title_en
     if search_term:
         try:
-            print(f"[debug] Wikimedia Commons'da ara: {search_term}", file=sys.stderr)
             url = f"https://commons.wikimedia.org/w/api.php?action=query&list=search&srsearch={urllib.parse.quote(search_term)}&srnamespace=6&format=json&srlimit=10"
+            print(f"[debug] Yöntem 3: Wikimedia Commons araması", file=sys.stderr)
             r = requests.get(url, timeout=10)
+            methods_tried.append("Wikimedia-Commons")
             if r.status_code == 200:
                 results = r.json().get("query", {}).get("search", [])
                 print(f"[debug] Wikimedia sonuç: {len(results)} dosya", file=sys.stderr)
                 for result in results:
                     title_found = result.get("title", "")
-                    if any(title_found.lower().endswith(ext) for ext in (".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg")):
+                    if any(title_found.lower().endswith(ext) for ext in (".jpg", ".jpeg", ".png", ".webp")):
                         image_url = f"https://commons.wikimedia.org/wiki/Special:FilePath/{urllib.parse.quote(title_found)}"
-                        print(f"[debug] Resim bulundu: {title_found}", file=sys.stderr)
-                        return image_url
+                        try:
+                            img_check = requests.head(image_url, timeout=5)
+                            if img_check.status_code == 200:
+                                print(f"[debug] ✓ Görsel bulundu (Wikimedia): {title_found}", file=sys.stderr)
+                                return image_url
+                        except Exception as e:
+                            print(f"[debug] Görsel doğrulama hatası: {e}", file=sys.stderr)
+                            continue
         except Exception as e:
-            print(f"[debug] Wikimedia hatası: {type(e).__name__}: {e}", file=sys.stderr)
+            print(f"[debug] Wikimedia hatası: {e}", file=sys.stderr)
 
-    print(f"[debug] Fotoğraf bulunamadı", file=sys.stderr)
+    print(f"[debug] ✗ Fotoğraf bulunamadı (denenen yöntemler: {', '.join(methods_tried)})", file=sys.stderr)
     return None
 
 
 def main():
-    weekday = datetime.datetime.now(datetime.timezone.utc).isoweekday()
-    category = CATEGORY_BY_WEEKDAY[weekday]
+    day_of_year = datetime.datetime.now(datetime.timezone.utc).timetuple().tm_yday
+    category_index = (day_of_year - 1) % len(CATEGORIES)
+    category = CATEGORIES[category_index]
+    print(f"[debug] Gün {day_of_year}, Kategori indeksi: {category_index}, Seçilen kategori: {category}", file=sys.stderr)
 
     placeholder_id = None
     try:
