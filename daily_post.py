@@ -17,7 +17,6 @@ import urllib.parse
 
 import requests
 from anthropic import Anthropic
-from youtubesearchpython import VideosSearch
 
 BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 CHAT_ID = os.environ["TELEGRAM_CHAT_ID"]
@@ -207,28 +206,6 @@ def find_image(title_tr, title_en):
     return None
 
 
-def find_youtube_video(search_query):
-    if not search_query:
-        print(f"[debug] find_youtube_video: search_query boş", file=sys.stderr)
-        return None
-    try:
-        print(f"[debug] YouTube ara: '{search_query}'", file=sys.stderr)
-        videos_search = VideosSearch(search_query, limit=5)
-        results = videos_search.result()
-        print(f"[debug] YouTube sonuç sayısı: {len(results.get('result', []))}", file=sys.stderr)
-        if results and "result" in results:
-            for i, video in enumerate(results["result"]):
-                video_url = video.get("link")
-                print(f"[debug] Video {i}: {video.get('title', 'N/A')[:50]} -> {video_url is not None}", file=sys.stderr)
-                if video_url:
-                    print(f"[debug] İlk video bulundu: {video_url}", file=sys.stderr)
-                    return video_url
-    except Exception as e:
-        print(f"[debug] find_youtube_video hatası: {type(e).__name__}: {e}", file=sys.stderr)
-    print(f"[debug] Video bulunamadı", file=sys.stderr)
-    return None
-
-
 def main():
     weekday = datetime.datetime.now(datetime.timezone.utc).isoweekday()
     category = CATEGORY_BY_WEEKDAY[weekday]
@@ -274,18 +251,13 @@ def main():
 
         wiki_url = find_wikipedia_link(content.get("wikipedia_title_tr"), content.get("wikipedia_title_en"))
         scholar_url = f"https://scholar.google.com/scholar?q={urllib.parse.quote(title)}"
-        video_url = find_youtube_video(content.get("youtube_search_query"))
         youtube_search_url = f"https://www.youtube.com/results?search_query={urllib.parse.quote(content.get('youtube_search_query', ''))}"
-        print(f"[debug] Video URL: {video_url}", file=sys.stderr)
         print(f"[debug] YouTube search URL: {youtube_search_url}", file=sys.stderr)
         buttons = []
         if wiki_url:
             buttons.append([{"text": "📖 Wikipedia Kaynağı", "url": wiki_url}])
         buttons.append([{"text": "🔬 Akademik Araştırmalar", "url": scholar_url}])
-        if video_url:
-            buttons.append([{"text": "▶️ Türkçe Video", "url": video_url}])
-        else:
-            buttons.append([{"text": "🎥 YouTube Arama", "url": youtube_search_url}])
+        buttons.append([{"text": "🎥 YouTube Arama", "url": youtube_search_url}])
         print(f"[debug] Button sayısı: {len(buttons)}", file=sys.stderr)
         tg_send_message("🔗 Derinlemesine incelemek için:", reply_markup={"inline_keyboard": buttons})
 
