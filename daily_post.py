@@ -112,11 +112,22 @@ def generate_content(category):
     if not text_blocks:
         raise RuntimeError(f"Yanıtta text bloğu yok, gelen block tipleri: {[getattr(b, 'type', None) for b in response.content]}")
     raw = text_blocks[0].strip()
+
+    # Extract JSON from markdown code fence if present
     if raw.startswith("```"):
-        raw = raw.strip("`")
-        raw = raw.split("\n", 1)[1] if "\n" in raw else raw
-        if raw.lower().startswith("json"):
-            raw = raw.split("\n", 1)[1]
+        # Split by triple backticks and get the middle content
+        parts = raw.split("```")
+        if len(parts) >= 3:
+            raw = parts[1].strip()
+        elif len(parts) == 2:
+            raw = parts[1].strip()
+
+        # Remove language identifier (json, python, etc) if it's on the first line
+        lines = raw.split("\n", 1)
+        if lines[0].lower() in ("json", "python", "javascript", "py"):
+            raw = lines[1] if len(lines) > 1 else ""
+        raw = raw.strip()
+
     return json.loads(raw)
 
 
