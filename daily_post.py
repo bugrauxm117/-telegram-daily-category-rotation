@@ -16,6 +16,7 @@ import urllib.parse
 
 import requests
 from anthropic import Anthropic
+from youtubesearchpython import VideosSearch
 
 BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 CHAT_ID = os.environ["TELEGRAM_CHAT_ID"]
@@ -86,6 +87,7 @@ saf bir JSON nesnesi döndür:
   "title": "Konu başlığı (kısa, çarpıcı)",
   "wikipedia_title_tr": "Türkçe Wikipedia'da olması muhtemel başlık (yoksa null)",
   "wikipedia_title_en": "İngilizce Wikipedia'da olması muhtemel başlık (görsel/kaynak için de kullanılacak)",
+  "youtube_search_query": "Türkçe YouTube araması için arama terimi",
   "sections": [
     "Telegram Markdown metni - Bölüm 1 (Geçmiş). '🌐 *{{title}} - Kapsamlı ve Derinlemesine Analiz*' başlığıyla başlasın, sonra '⏳ *1. GEÇMİŞ: Kökenler, Kök Nedenler ve Tarihsel Gelişim*' ve *Doğuşu:*, *Kritik Kırılma Noktaları:*, *Gözden Kaçan Detaylar:* alt başlıklarını içersin. SADECE tek yıldız *bold* kullan, # veya ** KULLANMA. 4000 karakteri geçme.",
     "Telegram Markdown metni - Bölüm 2 (Günümüz). '📍 *2. GÜNÜMÜZ: Mevcut Durum, Etkiler ve Paradigmalar*' ve *Şu Anki Durum:*, *Temel Dinamikler:*, *Güncel Tartışmalar ve Krizler:* alt başlıklarını içersin. 4000 karakteri geçme.",
@@ -128,7 +130,12 @@ def generate_content(category):
             raw = lines[1] if len(lines) > 1 else ""
         raw = raw.strip()
 
-    return json.loads(raw)
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError as e:
+        print(f"[hata] JSON decode hatası: {e}", file=sys.stderr)
+        print(f"[debug] Raw çıktı:\n{raw}", file=sys.stderr)
+        raise
 
 
 def find_wikipedia_link(title_tr, title_en):
@@ -147,16 +154,42 @@ def find_wikipedia_link(title_tr, title_en):
 
 def find_image(title_en):
     if not title_en:
+        print(f"[debug] find_image: title_en boş", file=sys.stderr)
         return None
     try:
         url = f"https://en.wikipedia.org/api/rest_v1/page/summary/{urllib.parse.quote(title_en.replace(' ', '_'))}"
+        print(f"[debug] Wikipedia API çağrı: {url}", file=sys.stderr)
         r = requests.get(url, timeout=10)
+        print(f"[debug] Wikipedia API yanıt status: {r.status_code}", file=sys.stderr)
         if r.status_code == 200:
             thumb = r.json().get("thumbnail", {}).get("source")
+            print(f"[debug] Thumbnail bulundu: {thumb is not None}", file=sys.stderr)
             if thumb:
                 return thumb
-    except (requests.RequestException, ValueError):
-        pass
+    except Exception as e:
+        print(f"[debug] find_image hatası: {type(e).__name__}: {e}", file=sys.stderr)
+    return None
+
+
+def find_youtube_video(search_query):
+    if not search_query:
+        print(f"[debug] find_youtube_video: search_query boş", file=sys.stderr)
+        return None
+    try:
+        print(f"[debug] YouTube ara: '{search_query}'", file=sys.stderr)
+        videos_search = VideosSearch(search_query, limit=5)
+        results = videos_search.result()
+        print(f"[debug] YouTube sonuç sayısı: {len(results.get('result', []))}", file=sys.stderr)
+        if results and "result" in results:
+            for i, video in enumerate(results["result"]):
+                video_url = video.get("link")
+                print(f"[debug] Video {i}: {video.get('title', 'N/A')[:50]} -> {video_url is not None}", file=sys.stderr)
+                if video_url:
+                    print(f"[debug] İlk video bulundu: {video_url}", file=sys.stderr)
+                    return video_url
+    except Exception as e:
+        print(f"[debug] find_youtube_video hatası: {type(e).__name__}: {e}", file=sys.stderr)
+    print(f"[debug] Video bulunamadı", file=sys.stderr)
     return None
 
 
@@ -177,12 +210,19 @@ def main():
     try:
         content = generate_content(category)
         title = content["title"]
+        print(f"[debug] Konu başlığı: {title}", file=sys.stderr)
 
         image_url = find_image(content.get("wikipedia_title_en"))
+        print(f"[debug] Fotoğraf URL: {image_url}", file=sys.stderr)
         if image_url:
-            r = tg_send_photo(image_url, f"🌐 *{title}*")
-            if not r.get("ok"):
-                print(f"[uyarı] sendPhoto başarısız: {r}", file=sys.stderr)
+            try:
+                r = tg_send_photo(image_url, f"🌐 *{title}*")
+                if not r.get("ok"):
+                    print(f"[uyarı] sendPhoto başarısız: {r}", file=sys.stderr)
+                else:
+                    print(f"[debug] Fotoğraf başarıyla gönderildi", file=sys.stderr)
+            except Exception as e:
+                print(f"[uyarı] fotoğraf gönderilirken hata: {e}", file=sys.stderr)
 
         for i, part in enumerate(content["sections"]):
             if i == 0 and placeholder_id:
@@ -194,10 +234,15 @@ def main():
 
         wiki_url = find_wikipedia_link(content.get("wikipedia_title_tr"), content.get("wikipedia_title_en"))
         scholar_url = f"https://scholar.google.com/scholar?q={urllib.parse.quote(title)}"
+        video_url = find_youtube_video(content.get("youtube_search_query"))
+        print(f"[debug] Video URL: {video_url}", file=sys.stderr)
         buttons = []
         if wiki_url:
             buttons.append([{"text": "📖 Wikipedia Kaynağı", "url": wiki_url}])
         buttons.append([{"text": "🔬 Akademik Araştırmalar", "url": scholar_url}])
+        if video_url:
+            buttons.append([{"text": "▶️ Türkçe Video", "url": video_url}])
+        print(f"[debug] Button sayısı: {len(buttons)}", file=sys.stderr)
         tg_send_message("🔗 Derinlemesine incelemek için:", reply_markup={"inline_keyboard": buttons})
 
         quiz = content["quiz"]
