@@ -10,6 +10,7 @@ talimatına değil, gerçek try/except'e dayanıyor.
 
 import datetime
 import json
+import json5
 import os
 import sys
 import urllib.parse
@@ -128,10 +129,14 @@ def generate_content(category):
 
     try:
         return json.loads(raw)
-    except json.JSONDecodeError as e:
-        print(f"[hata] JSON decode hatası: {e}", file=sys.stderr)
-        print(f"[debug] Raw çıktı:\n{raw}", file=sys.stderr)
-        raise
+    except json.JSONDecodeError:
+        try:
+            print(f"[debug] Standard JSON başarısız, json5 deniyor...", file=sys.stderr)
+            return json5.loads(raw)
+        except Exception as e:
+            print(f"[hata] JSON5 decode hatası: {e}", file=sys.stderr)
+            print(f"[debug] Raw çıktı:\n{raw}", file=sys.stderr)
+            raise
 
 
 def find_wikipedia_link(title_tr, title_en):
