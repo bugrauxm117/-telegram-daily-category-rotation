@@ -104,9 +104,16 @@ def generate_content(category):
     client = Anthropic(api_key=ANTHROPIC_API_KEY)
     response = client.messages.create(
         model=MODEL,
-        max_tokens=4096,
+        max_tokens=8192,
         messages=[{"role": "user", "content": GENERATION_PROMPT.format(category=category)}],
     )
+
+    # Check if response was truncated
+    stop_reason = response.stop_reason
+    print(f"[debug] API stop_reason: {stop_reason}", file=sys.stderr)
+    if stop_reason == "max_tokens":
+        raise RuntimeError(f"[kritik] Yanıt max_tokens limitine çarptı, JSON eksik. max_tokens daha da artırılmalı.")
+
     text_blocks = [b.text for b in response.content if getattr(b, "type", None) == "text"]
     if not text_blocks:
         raise RuntimeError(f"Yanıtta text bloğu yok, gelen block tipleri: {[getattr(b, 'type', None) for b in response.content]}")
