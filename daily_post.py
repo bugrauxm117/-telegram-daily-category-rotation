@@ -128,15 +128,22 @@ def generate_content(category):
         raw = raw.strip()
 
     try:
-        return json.loads(raw)
-    except json.JSONDecodeError:
+        return json.loads(raw, strict=False)
+    except json.JSONDecodeError as e:
+        print(f"[debug] strict=False JSON başarısız: {e}", file=sys.stderr)
         try:
-            print(f"[debug] Standard JSON başarısız, json5 deniyor...", file=sys.stderr)
-            return json5.loads(raw)
-        except Exception as e:
-            print(f"[hata] JSON5 decode hatası: {e}", file=sys.stderr)
-            print(f"[debug] Raw çıktı:\n{raw}", file=sys.stderr)
-            raise
+            print(f"[debug] Fallback: literal newline'ları escape et...", file=sys.stderr)
+            raw_cleaned = raw.replace('\n', '\\n')
+            return json.loads(raw_cleaned, strict=False)
+        except json.JSONDecodeError as e2:
+            print(f"[debug] Cleaned JSON de başarısız, json5 deniyor...", file=sys.stderr)
+            try:
+                return json5.loads(raw)
+            except Exception as e3:
+                print(f"[hata] Tüm parse yöntemleri başarısız", file=sys.stderr)
+                print(f"[hata] Hatalar: json={e}, cleaned={e2}, json5={e3}", file=sys.stderr)
+                print(f"[debug] Ham raw çıktı ({len(raw)} karakter):\n{raw}", file=sys.stderr)
+                raise
 
 
 def find_wikipedia_link(title_tr, title_en):
