@@ -152,6 +152,8 @@ def find_image(title_en):
     if not title_en:
         print(f"[debug] find_image: title_en boş", file=sys.stderr)
         return None
+
+    # Önce Wikipedia REST API'sini dene
     try:
         url = f"https://en.wikipedia.org/api/rest_v1/page/summary/{urllib.parse.quote(title_en.replace(' ', '_'))}"
         print(f"[debug] Wikipedia API çağrı: {url}", file=sys.stderr)
@@ -163,7 +165,26 @@ def find_image(title_en):
             if thumb:
                 return thumb
     except Exception as e:
-        print(f"[debug] find_image hatası: {type(e).__name__}: {e}", file=sys.stderr)
+        print(f"[debug] Wikipedia hatası: {type(e).__name__}: {e}", file=sys.stderr)
+
+    # Wikimedia Commons'dan ara
+    try:
+        print(f"[debug] Wikimedia Commons'da ara: {title_en}", file=sys.stderr)
+        url = f"https://commons.wikimedia.org/w/api.php?action=query&list=search&srsearch={urllib.parse.quote(title_en)}&srnamespace=6&format=json&srlimit=10"
+        r = requests.get(url, timeout=10)
+        if r.status_code == 200:
+            results = r.json().get("query", {}).get("search", [])
+            print(f"[debug] Wikimedia sonuç: {len(results)} dosya", file=sys.stderr)
+            for result in results:
+                title_found = result.get("title", "")
+                if any(title_found.lower().endswith(ext) for ext in (".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg")):
+                    image_url = f"https://commons.wikimedia.org/wiki/Special:FilePath/{urllib.parse.quote(title_found)}"
+                    print(f"[debug] Resim bulundu: {title_found}", file=sys.stderr)
+                    return image_url
+    except Exception as e:
+        print(f"[debug] Wikimedia hatası: {type(e).__name__}: {e}", file=sys.stderr)
+
+    print(f"[debug] Fotoğraf bulunamadı", file=sys.stderr)
     return None
 
 
