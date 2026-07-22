@@ -167,41 +167,41 @@ def find_wikipedia_link(title_tr, title_en):
     return None
 
 
-def find_image(title_en):
-    if not title_en:
-        print(f"[debug] find_image: title_en boş", file=sys.stderr)
-        return None
-
-    # Önce Wikipedia REST API'sini dene
-    try:
-        url = f"https://en.wikipedia.org/api/rest_v1/page/summary/{urllib.parse.quote(title_en.replace(' ', '_'))}"
-        print(f"[debug] Wikipedia API çağrı: {url}", file=sys.stderr)
-        r = requests.get(url, timeout=10)
-        print(f"[debug] Wikipedia API yanıt status: {r.status_code}", file=sys.stderr)
-        if r.status_code == 200:
-            thumb = r.json().get("thumbnail", {}).get("source")
-            print(f"[debug] Thumbnail bulundu: {thumb is not None}", file=sys.stderr)
-            if thumb:
-                return thumb
-    except Exception as e:
-        print(f"[debug] Wikipedia hatası: {type(e).__name__}: {e}", file=sys.stderr)
+def find_image(title_tr, title_en):
+    # Önce Türkçe Wikipedia REST API'sini dene
+    for lang, title in (("tr", title_tr), ("en", title_en)):
+        if not title:
+            continue
+        try:
+            url = f"https://{lang}.wikipedia.org/api/rest_v1/page/summary/{urllib.parse.quote(title.replace(' ', '_'))}"
+            print(f"[debug] Wikipedia API çağrı ({lang}): {url}", file=sys.stderr)
+            r = requests.get(url, timeout=10)
+            if r.status_code == 200:
+                thumb = r.json().get("thumbnail", {}).get("source")
+                if thumb:
+                    print(f"[debug] Thumbnail bulundu ({lang}): {thumb}", file=sys.stderr)
+                    return thumb
+        except Exception as e:
+            print(f"[debug] Wikipedia ({lang}) hatası: {type(e).__name__}: {e}", file=sys.stderr)
 
     # Wikimedia Commons'dan ara
-    try:
-        print(f"[debug] Wikimedia Commons'da ara: {title_en}", file=sys.stderr)
-        url = f"https://commons.wikimedia.org/w/api.php?action=query&list=search&srsearch={urllib.parse.quote(title_en)}&srnamespace=6&format=json&srlimit=10"
-        r = requests.get(url, timeout=10)
-        if r.status_code == 200:
-            results = r.json().get("query", {}).get("search", [])
-            print(f"[debug] Wikimedia sonuç: {len(results)} dosya", file=sys.stderr)
-            for result in results:
-                title_found = result.get("title", "")
-                if any(title_found.lower().endswith(ext) for ext in (".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg")):
-                    image_url = f"https://commons.wikimedia.org/wiki/Special:FilePath/{urllib.parse.quote(title_found)}"
-                    print(f"[debug] Resim bulundu: {title_found}", file=sys.stderr)
-                    return image_url
-    except Exception as e:
-        print(f"[debug] Wikimedia hatası: {type(e).__name__}: {e}", file=sys.stderr)
+    search_term = title_tr or title_en
+    if search_term:
+        try:
+            print(f"[debug] Wikimedia Commons'da ara: {search_term}", file=sys.stderr)
+            url = f"https://commons.wikimedia.org/w/api.php?action=query&list=search&srsearch={urllib.parse.quote(search_term)}&srnamespace=6&format=json&srlimit=10"
+            r = requests.get(url, timeout=10)
+            if r.status_code == 200:
+                results = r.json().get("query", {}).get("search", [])
+                print(f"[debug] Wikimedia sonuç: {len(results)} dosya", file=sys.stderr)
+                for result in results:
+                    title_found = result.get("title", "")
+                    if any(title_found.lower().endswith(ext) for ext in (".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg")):
+                        image_url = f"https://commons.wikimedia.org/wiki/Special:FilePath/{urllib.parse.quote(title_found)}"
+                        print(f"[debug] Resim bulundu: {title_found}", file=sys.stderr)
+                        return image_url
+        except Exception as e:
+            print(f"[debug] Wikimedia hatası: {type(e).__name__}: {e}", file=sys.stderr)
 
     print(f"[debug] Fotoğraf bulunamadı", file=sys.stderr)
     return None
@@ -248,11 +248,15 @@ def main():
         title = content["title"]
         print(f"[debug] Konu başlığı: {title}", file=sys.stderr)
 
-        image_url = find_image(content.get("wikipedia_title_en"))
+        image_url = find_image(content.get("wikipedia_title_tr"), content.get("wikipedia_title_en"))
         print(f"[debug] Fotoğraf URL: {image_url}", file=sys.stderr)
         if image_url:
             try:
-                r = tg_send_photo(image_url, f"🌐 *{title}*")
+                wiki_url = find_wikipedia_link(content.get("wikipedia_title_tr"), content.get("wikipedia_title_en"))
+                caption = f"🌐 *{title}*"
+                if wiki_url:
+                    caption += f"\n[📖 Wikipedia]({wiki_url})"
+                r = tg_send_photo(image_url, caption)
                 if not r.get("ok"):
                     print(f"[uyarı] sendPhoto başarısız: {r}", file=sys.stderr)
                 else:
@@ -271,13 +275,17 @@ def main():
         wiki_url = find_wikipedia_link(content.get("wikipedia_title_tr"), content.get("wikipedia_title_en"))
         scholar_url = f"https://scholar.google.com/scholar?q={urllib.parse.quote(title)}"
         video_url = find_youtube_video(content.get("youtube_search_query"))
+        youtube_search_url = f"https://www.youtube.com/results?search_query={urllib.parse.quote(content.get('youtube_search_query', ''))}"
         print(f"[debug] Video URL: {video_url}", file=sys.stderr)
+        print(f"[debug] YouTube search URL: {youtube_search_url}", file=sys.stderr)
         buttons = []
         if wiki_url:
             buttons.append([{"text": "📖 Wikipedia Kaynağı", "url": wiki_url}])
         buttons.append([{"text": "🔬 Akademik Araştırmalar", "url": scholar_url}])
         if video_url:
             buttons.append([{"text": "▶️ Türkçe Video", "url": video_url}])
+        else:
+            buttons.append([{"text": "🎥 YouTube Arama", "url": youtube_search_url}])
         print(f"[debug] Button sayısı: {len(buttons)}", file=sys.stderr)
         tg_send_message("🔗 Derinlemesine incelemek için:", reply_markup={"inline_keyboard": buttons})
 
