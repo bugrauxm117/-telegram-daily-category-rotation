@@ -93,11 +93,7 @@ saf bir JSON nesnesi döndür:
     "Telegram Markdown metni - Bölüm 2 (Günümüz). '📍 *2. GÜNÜMÜZ: Mevcut Durum, Etkiler ve Paradigmalar*' ve *Şu Anki Durum:*, *Temel Dinamikler:*, *Güncel Tartışmalar ve Krizler:* alt başlıklarını içersin. 4000 karakteri geçme.",
     "Telegram Markdown metni - Bölüm 3 (Gelecek + Genel Kültür). '🔮 *3. GELECEK: Projeksiyonlar, Trendler ve Senaryolar*' (*Kısa ve Orta Vadeli Trendler:*, *Uzun Vadeli Gelecek ve Fütürizm:*, *Fırsatlar ve Tehditler:*) VE ardından '🧠 *4. GENEL KÜLTÜR VE ENTELEKTÜEL NOTLAR*' (*Bilmeniz Gereken 3 Kavram/Terim:*, *Kültürel Etki:*, *Özet Çıkarım:*) bölümlerinin ikisini birden içersin. 4000 karakteri geçme."
   ],
-  "quiz": {{
-    "question": "Konuyla ilgili tek doğru cevaplı soru",
-    "options": ["A şıkkı (max 90 karakter)", "B şıkkı", "C şıkkı", "D şıkkı"],
-    "correct_option_id": 0
-  }}
+  "quiz": "Konuyla ilgili tek doğru cevaplı soru (max 300 karakter)|A şıkkı (max 90 karakter)|B şıkkı|C şıkkı|D şıkkı|0"
 }}
 
 correct_option_id, 0-3 arası doğru şıkkın index'i olmalı."""
@@ -245,10 +241,16 @@ def main():
         print(f"[debug] Button sayısı: {len(buttons)}", file=sys.stderr)
         tg_send_message("🔗 Derinlemesine incelemek için:", reply_markup={"inline_keyboard": buttons})
 
-        quiz = content["quiz"]
-        r = tg_send_poll(quiz["question"], quiz["options"], quiz["correct_option_id"])
-        if not r.get("ok"):
-            print(f"[uyarı] sendPoll başarısız: {r}", file=sys.stderr)
+        quiz_parts = content["quiz"].split("|")
+        if len(quiz_parts) >= 6:
+            quiz_question = quiz_parts[0]
+            quiz_options = quiz_parts[1:5]
+            quiz_correct_id = int(quiz_parts[5])
+            r = tg_send_poll(quiz_question, quiz_options, quiz_correct_id)
+            if not r.get("ok"):
+                print(f"[uyarı] sendPoll başarısız: {r}", file=sys.stderr)
+        else:
+            print(f"[uyarı] quiz format yanlış: {content['quiz']}", file=sys.stderr)
 
         print(f"Tamamlandı: {title}")
 
