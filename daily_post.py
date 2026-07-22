@@ -77,9 +77,18 @@ GENERATION_PROMPT = """Sen dünyanın en prestijli ansiklopedilerinin, tarihçil
 
 Kategori: {category}
 
-Bu kategoride, önceden çok işlenmiş klişeleri (yapay zeka, iklim değişikliği gibi) ATLAYARAK \
-spesifik ve çarpıcı bir konu seç. Sonra bu konu hakkında TÜRKÇE, akademik titizlikte, \
-isim/tarih/teori içeren, sürükleyici bir analiz yaz.
+KONU SEÇİMİ KRİTERLERİ (ÖNEMLİ):
+1) EN TEMEL, EN ÖNEMLİ ve EN YAYGN BİLİNEN konuları tercih et (Sanat için Rönesans/Van Gogh, Tarih için Devrimmler/Roma, Bilim için Görelilik/Evrim/DNA gibi).
+2) Uç, niş veya çok teknik konulardan kaçın (Von Neumann sondaları, Breakthrough Starshot gibi).
+3) Eğitimli ama uzman olmayan birinin "bunu duydum, merak ediyordum" diyeceği konu olsun.
+4) Kültürel, tarihsel veya bilimsel açıdan önemi YÜKSEK olmalı.
+5) ŞU KONULAR ZATENİŞLENDİ, TEKRAR ETME: {already_posted}
+
+Kategori: {category}
+Daha önce işlenen: {already_posted}
+
+Bu kategoride, yukarıdaki kriterler doğrultusunda, ÖN EME GELEN EN ÖNEMLİ bir konu seç (henüz işlenmemiş). \
+Sonra bu konu hakkında TÜRKÇE, akademik titizlikte, isim/tarih/teori içeren, sürükleyici bir analiz yaz.
 
 SADECE aşağıdaki JSON şemasına birebir uyan, başka hiçbir açıklama/markdown code-fence içermeyen \
 saf bir JSON nesnesi döndür:
@@ -100,12 +109,12 @@ saf bir JSON nesnesi döndür:
 correct_option_id, 0-3 arası doğru şıkkın index'i olmalı."""
 
 
-def generate_content(category):
+def generate_content(category, already_posted="Hiçbiri"):
     client = Anthropic(api_key=ANTHROPIC_API_KEY)
     response = client.messages.create(
         model=MODEL,
         max_tokens=8192,
-        messages=[{"role": "user", "content": GENERATION_PROMPT.format(category=category)}],
+        messages=[{"role": "user", "content": GENERATION_PROMPT.format(category=category, already_posted=already_posted)}],
     )
 
     # Check if response was truncated
@@ -256,9 +265,35 @@ def main():
         print(f"[uyarı] placeholder gönderilirken hata: {e}", file=sys.stderr)
 
     try:
-        content = generate_content(category)
+        # Load posted topics
+        posted_topics = {}
+        if os.path.exists("posted_topics.json"):
+            try:
+                with open("posted_topics.json", "r", encoding="utf-8") as f:
+                    posted_topics = json.load(f)
+            except Exception as e:
+                print(f"[uyarı] posted_topics.json okunamadı: {e}", file=sys.stderr)
+
+        # Get already posted topics for this category
+        already_posted_list = posted_topics.get(category, [])
+        already_posted_str = ", ".join(already_posted_list[-15:]) if already_posted_list else "Hiçbiri"
+        print(f"[debug] Kategori '{category}' daha önce işlenen konular: {already_posted_str}", file=sys.stderr)
+
+        # Generate content with the list
+        content = generate_content(category, already_posted_str)
         title = content["title"]
         print(f"[debug] Konu başlığı: {title}", file=sys.stderr)
+
+        # Save the new topic
+        if category not in posted_topics:
+            posted_topics[category] = []
+        posted_topics[category].append(title)
+        try:
+            with open("posted_topics.json", "w", encoding="utf-8") as f:
+                json.dump(posted_topics, f, ensure_ascii=False, indent=2)
+            print(f"[debug] Konu kaydı güncellendi", file=sys.stderr)
+        except Exception as e:
+            print(f"[uyarı] posted_topics.json yazılamadı: {e}", file=sys.stderr)
 
         image_url = find_image(content.get("wikipedia_title_tr"), content.get("wikipedia_title_en"))
         print(f"[debug] Fotoğraf URL: {image_url}", file=sys.stderr)
