@@ -8,6 +8,7 @@ kodu ile yapılıyor, bu yüzden aşağıdaki garanti-fallback mekanizması bir 
 talimatına değil, gerçek try/except'e dayanıyor.
 """
 
+import calendar
 import datetime
 import json
 import json5
@@ -36,6 +37,30 @@ CATEGORIES = [
     "Teknoloji & Gelecek",
     "Matematik & Mantık",
 ]
+
+# Rotasyonun başlangıç günü. Cron "0 6 */2 * *" olduğu için çalışma günleri
+# her ayın tek günleridir (1, 3, ... 31).
+ROTATION_EPOCH = datetime.date(2026, 1, 1)
+
+
+def rotation_index(today):
+    """Kaçıncı çalışma olduğumuzu sayıp kategori indeksini döndürür.
+
+    Takvim gününe göre modulo almak 2 günlük aralıkta bozulur (tek günlerde
+    (gün - 1) % 8 sadece çift indeksleri üretir, 8 kategorinin 4'ü hiç gelmez).
+    Bunun yerine epoch'tan bu yana kaç kez çalıştığımızı sayıyoruz; böylece
+    kategoriler ay/yıl sınırlarında da kaymadan sırayla dönüyor.
+    """
+    runs = 0
+    year, month = ROTATION_EPOCH.year, ROTATION_EPOCH.month
+    while (year, month) < (today.year, today.month):
+        # Bir aydaki tek gün sayısı: (gün sayısı + 1) // 2
+        runs += (calendar.monthrange(year, month)[1] + 1) // 2
+        month += 1
+        if month > 12:
+            year, month = year + 1, 1
+    runs += (today.day + 1) // 2  # bu ayın bugüne kadarki tek günleri
+    return (runs - 1) % len(CATEGORIES)
 
 
 def tg_send_message(text, reply_markup=None, chat_id=None):
@@ -131,12 +156,22 @@ saf bir JSON nesnesi döndür:
   "sections": [
     "Telegram Markdown metni - Bölüm 1 (Geçmiş). '🌐 *{{title}} - Kapsamlı ve Derinlemesine Analiz*' başlığıyla başlasın, sonra '⏳ *1. GEÇMİŞ: Kökenler, Kök Nedenler ve Tarihsel Gelişim*' ve *Doğuşu:*, *Kritik Kırılma Noktaları:*, *Gözden Kaçan Detaylar:* alt başlıklarını içersin. SADECE tek yıldız *bold* kullan, # veya ** KULLANMA. 4000 karakteri geçme.",
     "Telegram Markdown metni - Bölüm 2 (Günümüz). '📍 *2. GÜNÜMÜZ: Mevcut Durum, Etkiler ve Paradigmalar*' ve *Şu Anki Durum:*, *Temel Dinamikler:*, *Güncel Tartışmalar ve Krizler:* alt başlıklarını içersin. 4000 karakteri geçme.",
-    "Telegram Markdown metni - Bölüm 3 (Gelecek + Genel Kültür). '🔮 *3. GELECEK: Projeksiyonlar, Trendler ve Senaryolar*' (*Kısa ve Orta Vadeli Trendler:*, *Uzun Vadeli Gelecek ve Fütürizm:*, *Fırsatlar ve Tehditler:*) VE ardından '🧠 *4. GENEL KÜLTÜR VE ENTELEKTÜEL NOTLAR*' (*Bilmeniz Gereken 3 Kavram/Terim:*, *Kültürel Etki:*, *Özet Çıkarım:*) bölümlerinin ikisini birden içersin. 4000 karakteri geçme."
+    "Telegram Markdown metni - Bölüm 3 (Gelecek + Genel Kültür + Akılda Kalsın). '🔮 *3. GELECEK: Projeksiyonlar, Trendler ve Senaryolar*' (*Kısa ve Orta Vadeli Trendler:*, *Uzun Vadeli Gelecek ve Fütürizm:*, *Fırsatlar ve Tehditler:*), ardından '🧠 *4. GENEL KÜLTÜR VE ENTELEKTÜEL NOTLAR*' (*Bilmeniz Gereken 3 Kavram/Terim:*, *Kültürel Etki:*, *Özet Çıkarım:*), VE EN SONDA, 'Özet Çıkarım'dan hemen sonra MUTLAKA '⚡ *AKILDA KALSIN*' bölümü gelsin (kuralları aşağıda). Bu üç bölümün üçünü birden içersin. 4000 karakteri geçme."
   ],
   "quiz": "Konuyla ilgili tek doğru cevaplı soru (max 300 karakter)|A şıkkı (max 90 karakter)|B şıkkı|C şıkkı|D şıkkı|0"
 }}
 
-correct_option_id, 0-3 arası doğru şıkkın index'i olmalı."""
+correct_option_id, 0-3 arası doğru şıkkın index'i olmalı.
+
+"⚡ AKILDA KALSIN" BÖLÜMÜNÜN KURALLARI (ZORUNLU):
+- Yeri: 3. bölümün (sections[2]) EN SONU, "Özet Çıkarım"dan hemen sonra. Bu bölümden sonra hiçbir şey yazma.
+- Başlık birebir şöyle olsun: ⚡ *AKILDA KALSIN*
+- Tam olarak 3 madde olsun; ne 2 ne 4. Her madde "• " ile başlasın.
+- Her madde TEK CÜMLE olsun ve ~20 kelimeyi geçmesin; kısa, net, vurucu.
+- Maddeler konunun EN KRİTİK ve akılda kalıcı çıkarımları olsun. Yukarıdaki metinden cümle kopyalama; özü damıt.
+- Klişe ve genel geçer ifadelerden kaçın; mümkün olduğunca somut isim, tarih, sayı veya net bir sonuç içersin.
+- ÖLÇÜT: Uzun yazıyı okumaya vakti olmayan biri SADECE bu 3 maddeyi okuduğunda konunun özünü kavramış olmalı. \
+Bu bölümü tek başına okunabilir bir "cep özeti" gibi yaz."""
 
 
 def generate_content(category, already_posted="Hiçbiri"):
@@ -283,10 +318,10 @@ def find_image(title_tr, title_en):
 
 
 def main():
-    day_of_year = datetime.datetime.now(datetime.timezone.utc).timetuple().tm_yday
-    category_index = (day_of_year - 1) % len(CATEGORIES)
+    today = datetime.datetime.now(datetime.timezone.utc).date()
+    category_index = rotation_index(today)
     category = CATEGORIES[category_index]
-    print(f"[debug] Gün {day_of_year}, Kategori indeksi: {category_index}, Seçilen kategori: {category}", file=sys.stderr)
+    print(f"[debug] Tarih {today}, Kategori indeksi: {category_index}, Seçilen kategori: {category}", file=sys.stderr)
 
     placeholder_id = None
     try:
