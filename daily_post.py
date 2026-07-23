@@ -38,16 +38,46 @@ CATEGORIES = [
 ]
 
 
-def tg_send_message(text, reply_markup=None):
-    data = {"chat_id": CHAT_ID, "text": text, "parse_mode": "Markdown"}
+def tg_send_message(text, reply_markup=None, chat_id=None):
+    if chat_id is None:
+        chat_id = CHAT_ID
+    data = {"chat_id": chat_id, "text": text, "parse_mode": "Markdown"}
     if reply_markup:
         data["reply_markup"] = json.dumps(reply_markup)
     return requests.post(f"{TG_API}/sendMessage", data=data, timeout=HTTP_TIMEOUT).json()
 
 
-def tg_edit_message(message_id, text):
+def tg_send_message_chunked(text, max_length=4090):
+    """Uzun metni 4096 karakter sınırına göre parçala ve ardışık gönder."""
+    chunks = []
+    current_chunk = ""
+
+    paragraphs = text.split("\n\n")
+    for para in paragraphs:
+        if len(current_chunk) + len(para) + 2 <= max_length:
+            current_chunk += para + "\n\n"
+        else:
+            if current_chunk:
+                chunks.append(current_chunk.strip())
+            current_chunk = para + "\n\n"
+    if current_chunk:
+        chunks.append(current_chunk.strip())
+
+    results = []
+    for chunk in chunks:
+        r = tg_send_message(chunk)
+        results.append(r)
+        if not r.get("ok"):
+            print(f"[uyarı] sendMessage başarısız (chunk): {r}", file=sys.stderr)
+
+    return results
+
+
+def tg_edit_message(message_id, text, chat_id=None):
+    if chat_id is None:
+        chat_id = CHAT_ID
     data = {
-        "chat_id": CHAT_ID,
+        "chat_id": chat_id,
         "message_id": message_id,
         "text": text,
         "parse_mode": "Markdown",
@@ -176,75 +206,79 @@ def find_wikipedia_link(title_tr, title_en):
     return None
 
 
+def verify_image_url(url):
+    try:
+        r = requests.head(url, timeout=5, allow_redirects=True)
+        return r.status_code == 200 and r.headers.get("content-type", "").startswith("image")
+    except Exception:
+        return False
+
+
 def find_image(title_tr, title_en):
     methods_tried = []
 
-    # Yöntem 1: Wikipedia REST API (thumbnail veya original)
+    # Yöntem 1: Wikipedia REST API (original, sonra thumbnail)
     for lang, title in (("tr", title_tr), ("en", title_en)):
         if not title:
             continue
         try:
             url = f"https://{lang}.wikipedia.org/api/rest_v1/page/summary/{urllib.parse.quote(title.replace(' ', '_'))}"
-            print(f"[debug] Yöntem 1: Wikipedia REST API ({lang})", file=sys.stderr)
+            print(f"[debug] Yöntem 1: Wikipedia REST ({lang})", file=sys.stderr)
             r = requests.get(url, timeout=10)
-            methods_tried.append(f"Wikipedia-REST-{lang}")
+            methods_tried.append(f"REST-{lang}")
             if r.status_code == 200:
                 data = r.json()
-                thumb = data.get("thumbnail", {}).get("source")
                 original = data.get("originalimage", {}).get("source")
-                image_url = original or thumb
-                if image_url:
-                    print(f"[debug] ✓ Görsel bulundu ({lang}): {image_url}", file=sys.stderr)
-                    return image_url
+                thumb = data.get("thumbnail", {}).get("source")
+                for candidate in [original, thumb]:
+                    if candidate and verify_image_url(candidate):
+                        print(f"[debug] ✓ Görsel doğrulandı ({lang}): {candidate[:60]}...", file=sys.stderr)
+                        return candidate
         except Exception as e:
-            print(f"[debug] Wikipedia REST ({lang}) hatası: {e}", file=sys.stderr)
+            print(f"[debug] REST ({lang}) hatası: {e}", file=sys.stderr)
 
-    # Yöntem 2: Wikipedia pageimages API (original image)
+    # Yöntem 2: Wikipedia pageimages API (original|thumbnail)
     for lang, title in (("tr", title_tr), ("en", title_en)):
         if not title:
             continue
         try:
-            url = f"https://{lang}.wikipedia.org/w/api.php?action=query&titles={urllib.parse.quote(title)}&prop=pageimages&piprop=original&format=json"
-            print(f"[debug] Yöntem 2: Wikipedia pageimages API ({lang})", file=sys.stderr)
+            url = f"https://{lang}.wikipedia.org/w/api.php?action=query&titles={urllib.parse.quote(title)}&prop=pageimages&piprop=original|thumbnail&format=json&pithumbsize=500"
+            print(f"[debug] Yöntem 2: Wikipedia pageimages ({lang})", file=sys.stderr)
             r = requests.get(url, timeout=10)
-            methods_tried.append(f"Wikipedia-pageimages-{lang}")
+            methods_tried.append(f"Pageimages-{lang}")
             if r.status_code == 200:
                 pages = r.json().get("query", {}).get("pages", {})
                 for page in pages.values():
-                    image_url = page.get("original", {}).get("source")
-                    if image_url:
-                        print(f"[debug] ✓ Görsel bulundu ({lang} pageimages): {image_url}", file=sys.stderr)
-                        return image_url
+                    original = page.get("original", {}).get("source")
+                    thumb = page.get("thumbnail", {}).get("source")
+                    for candidate in [original, thumb]:
+                        if candidate and verify_image_url(candidate):
+                            print(f"[debug] ✓ Görsel doğrulandı (pageimages-{lang}): {candidate[:60]}...", file=sys.stderr)
+                            return candidate
         except Exception as e:
-            print(f"[debug] Wikipedia pageimages ({lang}) hatası: {e}", file=sys.stderr)
+            print(f"[debug] Pageimages ({lang}) hatası: {e}", file=sys.stderr)
 
     # Yöntem 3: Wikimedia Commons arama
     search_term = title_tr or title_en
     if search_term:
         try:
-            url = f"https://commons.wikimedia.org/w/api.php?action=query&list=search&srsearch={urllib.parse.quote(search_term)}&srnamespace=6&format=json&srlimit=10"
-            print(f"[debug] Yöntem 3: Wikimedia Commons araması", file=sys.stderr)
+            url = f"https://commons.wikimedia.org/w/api.php?action=query&list=search&srsearch={urllib.parse.quote(search_term)}&srnamespace=6&format=json&srlimit=15"
+            print(f"[debug] Yöntem 3: Wikimedia Commons", file=sys.stderr)
             r = requests.get(url, timeout=10)
-            methods_tried.append("Wikimedia-Commons")
+            methods_tried.append("Commons")
             if r.status_code == 200:
                 results = r.json().get("query", {}).get("search", [])
-                print(f"[debug] Wikimedia sonuç: {len(results)} dosya", file=sys.stderr)
                 for result in results:
                     title_found = result.get("title", "")
                     if any(title_found.lower().endswith(ext) for ext in (".jpg", ".jpeg", ".png", ".webp")):
                         image_url = f"https://commons.wikimedia.org/wiki/Special:FilePath/{urllib.parse.quote(title_found)}"
-                        try:
-                            img_check = requests.head(image_url, timeout=5)
-                            if img_check.status_code == 200:
-                                print(f"[debug] ✓ Görsel bulundu (Wikimedia): {title_found}", file=sys.stderr)
-                                return image_url
-                        except Exception as e:
-                            print(f"[debug] Görsel doğrulama hatası: {e}", file=sys.stderr)
-                            continue
+                        if verify_image_url(image_url):
+                            print(f"[debug] ✓ Görsel doğrulandı (Commons): {title_found[:60]}", file=sys.stderr)
+                            return image_url
         except Exception as e:
-            print(f"[debug] Wikimedia hatası: {e}", file=sys.stderr)
+            print(f"[debug] Commons hatası: {e}", file=sys.stderr)
 
-    print(f"[debug] ✗ Fotoğraf bulunamadı (denenen yöntemler: {', '.join(methods_tried)})", file=sys.stderr)
+    print(f"[debug] ✗ Fotoğraf bulunamadı ({', '.join(methods_tried)} denendi)", file=sys.stderr)
     return None
 
 
@@ -312,12 +346,35 @@ def main():
                 print(f"[uyarı] fotoğraf gönderilirken hata: {e}", file=sys.stderr)
 
         for i, part in enumerate(content["sections"]):
-            if i == 0 and placeholder_id:
-                r = tg_edit_message(placeholder_id, part)
+            # Bölümü gerekirse parçala (4096 karakter limiti)
+            if len(part) > 4090:
+                print(f"[debug] Bölüm {i} çok uzun ({len(part)} karakter), parçalanıyor...", file=sys.stderr)
+                chunks = []
+                current = ""
+                for para in part.split("\n\n"):
+                    if len(current) + len(para) + 2 <= 4090:
+                        current += para + "\n\n"
+                    else:
+                        if current:
+                            chunks.append(current.strip())
+                        current = para + "\n\n"
+                if current:
+                    chunks.append(current.strip())
+
+                for j, chunk in enumerate(chunks):
+                    if i == 0 and j == 0 and placeholder_id:
+                        r = tg_edit_message(placeholder_id, chunk)
+                    else:
+                        r = tg_send_message(chunk)
+                    if not r.get("ok"):
+                        raise RuntimeError(f"Telegram gönderimi başarısız (bölüm {i}, parça {j}): {r}")
             else:
-                r = tg_send_message(part)
-            if not r.get("ok"):
-                raise RuntimeError(f"Telegram gönderimi başarısız (bölüm {i}): {r}")
+                if i == 0 and placeholder_id:
+                    r = tg_edit_message(placeholder_id, part)
+                else:
+                    r = tg_send_message(part)
+                if not r.get("ok"):
+                    raise RuntimeError(f"Telegram gönderimi başarısız (bölüm {i}): {r}")
 
         wiki_url = find_wikipedia_link(content.get("wikipedia_title_tr"), content.get("wikipedia_title_en"))
         scholar_url = f"https://scholar.google.com/scholar?q={urllib.parse.quote(title)}"
@@ -360,5 +417,24 @@ def main():
         raise
 
 
+def send_admin_error(error_msg):
+    """Admin'e hata mesajı gönder (ADMIN_CHAT_ID secret varsa)."""
+    admin_chat_id = os.environ.get("ADMIN_CHAT_ID")
+    if not admin_chat_id:
+        print(f"[uyarı] ADMIN_CHAT_ID tanımlanmadı, hata admin'e gönderilemedi", file=sys.stderr)
+        return
+    try:
+        tg_send_message(error_msg, chat_id=admin_chat_id)
+        print(f"[debug] Hata mesajı admin'e gönderildi", file=sys.stderr)
+    except Exception as e:
+        print(f"[uyarı] Admin'e hata gönderimi başarısız: {e}", file=sys.stderr)
+
+
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as e:
+        error_msg = f"❌ *Bot Hatası*\n\n{type(e).__name__}: {str(e)[:300]}"
+        print(f"[kritik] {error_msg}", file=sys.stderr)
+        send_admin_error(error_msg)
+        raise
